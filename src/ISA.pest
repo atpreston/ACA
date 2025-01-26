@@ -1,6 +1,12 @@
 register = {^"r" ~ ASCII_DIGIT+}
 immediate = {"#" ~ ASCII_DIGIT+}
 
+operand = {register | immediate}
+
+label = {ASCII_ALPHA+}
+
+location = {register | immediate | label}
+
 binop = {register ~ operand ~ operand}
 
 addinst = {^"add " ~ binop}
@@ -17,7 +23,7 @@ mvinst = {^"mv " ~ register ~ immediate}
 
 ldinst = {^"ld " ~ register ~ operand}
 ldrinst = {^"ldr " ~ register ~ operand ~ register}
-stinst = {^"st " ~ operand, operand}
+stinst = {^"st " ~ operand ~ operand}
 
 binst = {^"b " ~ location}
 jinst = {^"j " ~ location}
@@ -29,9 +35,12 @@ haltinst = {^"halt"}
 
 instruction = {addinst | subinst | mulinst | notinst | 
     andinst | orinst | xorinst |
-    cp inst | mv inst |
+    cpinst | mvinst |
     ldinst | ldrinst | stinst |
     binst | jinst | bileinst | jileinst |
     noopinst | haltinst}
 
-program = (instruction ~ NEWLINE+)+
+program = {(instruction ~ NEWLINE+)+}
+
+WHITESPACE = _{" "}
+COMMENT = _{"\\" ~ (!NEWLINE ~ ANY)* ~ NEWLINE}
