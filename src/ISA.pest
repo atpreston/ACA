@@ -1,46 +1,47 @@
 register = {^"r" ~ ASCII_DIGIT+}
 immediate = {"#" ~ ASCII_DIGIT+}
 
-operand = {register | immediate}
+label = @{ASCII_ALPHA+}
 
-label = {ASCII_ALPHA+}
+operand = _{register | immediate}
+location = _{register | immediate | label}
 
-location = {register | immediate | label}
+binop = _{register ~ operand ~ operand}
 
-binop = {register ~ operand ~ operand}
+addinst = {^"add" ~ binop}
+subinst = {^"sub" ~ binop}
+mulinst = {^"mul" ~ binop}
 
-addinst = {^"add " ~ binop}
-subinst = {^"sub " ~ binop}
-mulinst = {^"mul " ~ binop}
+notinst = {^"not" ~ register ~ operand}
+andinst = {^"and" ~ binop}
+orinst = {^"or" ~ binop}
+xorinst = {^"xor" ~ binop}
 
-notinst = {^"not " ~ register ~ operand}
-andinst = {^"and " ~ binop}
-orinst = {^"or " ~ binop}
-xorinst = {^"xor " ~ binop}
+cpinst = {^"cp" ~ register ~ register}
+mvinst = {^"mv" ~ register ~ immediate}
 
-cpinst = {^"cp " ~ register ~ register}
-mvinst = {^"mv " ~ register ~ immediate}
+ldinst = {^"ld" ~ register ~ operand}
+ldrinst = {^"ldr" ~ register ~ operand ~ operand}
+stinst = {^"st" ~ operand ~ operand}
 
-ldinst = {^"ld " ~ register ~ operand}
-ldrinst = {^"ldr " ~ register ~ operand ~ register}
-stinst = {^"st " ~ operand ~ operand}
-
-binst = {^"b " ~ location}
-jinst = {^"j " ~ location}
-bileinst = {^"bile " ~ location ~ register}
-jileinst = {^"jile " ~ location ~ register}
+bilzinst = {^"bilz" ~ register ~ location}
+jilzinst = {^"jilz" ~ register ~ operand}
+biltinst = {^"bilt" ~ register ~ operand ~ location}
+jiltinst = {^"jilt" ~ register ~ operand ~ operand}
+binst = {^"b" ~ location}
+jinst = {^"j" ~ operand}
 
 noopinst = {^"noop"}
 haltinst = {^"halt"}
 
-instruction = {addinst | subinst | mulinst | notinst | 
-    andinst | orinst | xorinst |
+instruction = _{addinst | subinst | mulinst | notinst | andinst | orinst | xorinst |
     cpinst | mvinst |
     ldinst | ldrinst | stinst |
-    binst | jinst | bileinst | jileinst |
+    bilzinst | jilzinst | biltinst | jiltinst |
+    binst | jinst |
     noopinst | haltinst}
 
-program = {(instruction ~ NEWLINE+)+}
+program = {((instruction | label) ~ NEWLINE+)* ~ (instruction | label) ~ WHITESPACE*}
 
 WHITESPACE = _{" "}
-COMMENT = _{"\\" ~ (!NEWLINE ~ ANY)* ~ NEWLINE}
+COMMENT = _{"//" ~ (!NEWLINE ~ ANY)* ~ NEWLINE}

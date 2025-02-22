@@ -1,0 +1,4 @@
+Ld r1 #1000
+Sub r1 r1 #1
+Bilz r1 #2
+Halt
