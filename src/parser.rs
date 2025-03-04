@@ -1,8 +1,8 @@
 use pest_derive::Parser;
-use pest::Parser;
+use pest::{iterators::Pairs, Parser};
 use crate::processor::{Immediate, Instr, Operand, Program, Register};
 
-use std::*;
+use std::{collections::HashMap, *};
 #[derive(Parser)]
 #[grammar = "ISA.pest"]
 struct MyParser;
@@ -23,7 +23,7 @@ fn build_from_pairs<'a>(pairs: pest::iterators::Pair<'a, Rule>) -> Result<Vec<Op
         match pair.as_rule() {
             Rule::register => return_vec.push(string_to_reg(&pair.as_str()[1..])),
             Rule::immediate => return_vec.push(string_to_imm(&pair.as_str()[1..])),
-            _ => {let val = build_from_pairs(pairs.clone().into_inner().next().unwrap());
+            _ => {let val = build_from_pairs(pairs.into_inner().next().unwrap());
                 return val.to_owned()}
         }
     }
@@ -53,14 +53,34 @@ fn destination_from_operands(ops: &Vec<Operand>) -> Result<Register, &'static st
     else {Err("No operands given")}
 }
 
+fn get_label(pair: pest::iterators::Pair<'_, Rule>) -> Option<HashMap<&str, u8>> {
+    match pair.as_rule() {
+        Rule::label => Some([(pair.as_str(), 1 as u8)].iter().cloned().collect()),
+        _ => {return get_labels(pair.into_inner())}
+    }
+}
+
+fn get_labels(pairs: Pairs<'_, Rule>) -> Option<HashMap<&str, u8>> {
+    let mut ret_map: HashMap<&str, u8> = HashMap::new();
+    for pair in pairs {
+        match get_label(pair) {
+            Some(new_map) => {ret_map.extend(new_map);},
+            None => ()
+        }
+    }
+    return Some(ret_map);
+}
+
 pub fn parse(path: &str) -> Result<Program, &str> {
     let mut program: Program = vec![];
     let file = fs::read_to_string(path).expect("Cannot read file");
-    println!("{}", file);
+    // println!("{}", file);
     let pairs: pest::iterators::Pairs<'_, Rule> = MyParser::parse(Rule::program, &file).expect("unsuccessful parse");
-    for pair in pairs {
+    println!("PAIRS: {:?}", pairs);
+    let label_map = get_labels(pairs.clone());
+    for pair in pairs.into_iter() {
         match parse_pair(pair) {
-            Ok(prog) => {for inst in prog {program.push(inst)}}
+            Ok(mut prog) => {println!("Program appended: {:?}", prog); program.append(&mut prog)}
             Err(err) => {println!("ERROR in parse: {}", err); return Err("Unsuccessful parse of pair")},
         }
     }
@@ -71,7 +91,7 @@ fn parse_pairs(pairs: pest::iterators::Pairs<'_, Rule>) -> Result<Program, &'sta
     let mut program: Program = vec![];
     for pair in pairs {
         match parse_pair(pair) {
-            Ok(prg) => {for inst in prg {program.push(inst);}},
+            Ok(prg) => {program.extend(prg);},
             Err(err) => {println!("ERROR in parse: {}", err); return Err("Unsuccessful parse of pair")},
         }
     }
@@ -81,19 +101,20 @@ fn parse_pairs(pairs: pest::iterators::Pairs<'_, Rule>) -> Result<Program, &'sta
 fn parse_pair(pair: pest::iterators::Pair<'_, Rule>) -> Result<Program, & 'static str>{
     let operands = build_from_pairs(pair.clone()).expect("Cannot recover operands");
     let destination = destination_from_operands(&operands);
+    let unwrap_dest = destination.unwrap_or_else(|_| panic!("Destination {destination:#?} cannot be recovered"));
     match pair.as_rule() {
-        Rule::addinst => Ok(vec![Instr::Add(destination.unwrap(), operands[1], operands[2])]),
-        Rule::subinst => Ok(vec![Instr::Sub(destination.unwrap(), operands[1], operands[2])]),
-        Rule::mulinst => Ok(vec![Instr::Mul(destination.unwrap(), operands[1], operands[2])]),
+        Rule::addinst => Ok(vec![Instr::Add(unwrap_dest, operands[1], operands[2])]),
+        Rule::subinst => Ok(vec![Instr::Sub(unwrap_dest, operands[1], operands[2])]),
+        Rule::mulinst => Ok(vec![Instr::Mul(unwrap_dest, operands[1], operands[2])]),
 
-        Rule::notinst => Ok(vec![Instr::Not(destination.unwrap(), operands[1])]),
-        Rule::andinst => Ok(vec![Instr::And(destination.unwrap(), operands[1], operands[2])]),
-        Rule::orinst => Ok(vec![Instr::Or(destination.unwrap(), operands[1], operands[2])]),
-        Rule::xorinst => Ok(vec![Instr::Xor(destination.unwrap(), operands[1], operands[2])]),
+        Rule::notinst => Ok(vec![Instr::Not(unwrap_dest, operands[1])]),
+        Rule::andinst => Ok(vec![Instr::And(unwrap_dest, operands[1], operands[2])]),
+        Rule::orinst => Ok(vec![Instr::Or(unwrap_dest, operands[1], operands[2])]),
+        Rule::xorinst => Ok(vec![Instr::Xor(unwrap_dest, operands[1], operands[2])]),
 
-        Rule::cpinst => Ok(vec![Instr::Cp(destination.unwrap(), operands[1])]),
-        Rule::ldinst => Ok(vec![Instr::Ld(destination.unwrap(), operands[1])]),
-        Rule::ldrinst => Ok(vec![Instr::Ldr(destination.unwrap(), operands[1], operands[2])]),
+        Rule::cpinst => Ok(vec![Instr::Cp(unwrap_dest, operands[1])]),
+        Rule::ldinst => Ok(vec![Instr::Ld(unwrap_dest, operands[1])]),
+        Rule::ldrinst => Ok(vec![Instr::Ldr(unwrap_dest, operands[1], operands[2])]),
         Rule::stinst => Ok(vec![Instr::St(operands[0], operands[1])]),
 
         Rule::binst => Ok(vec![Instr::B(location_from_pair(pair.into_inner().next().unwrap()).unwrap())]), 
@@ -102,11 +123,15 @@ fn parse_pair(pair: pest::iterators::Pair<'_, Rule>) -> Result<Program, & 'stati
         Rule::jilzinst => Ok(vec![Instr::Jilz(reg_from_op(operands[0]).unwrap(), location_from_pair(pair.into_inner().next().unwrap()).unwrap())]),
         Rule::jiltinst => Ok(vec![Instr::Jilt(reg_from_op(operands[0]).unwrap(), operands[1], operands[2])]),
         Rule::biltinst => Ok(vec![Instr::Bilt(reg_from_op(operands[0]).unwrap(), operands[1], location_from_pair(pair).unwrap())]), // TODO: THIS WILL NOT WORK - LOCATION IS WRONG
+        Rule::bigzinst => Ok(vec![Instr::Bigz(reg_from_op(operands[0]).unwrap(), operands[1])]),
+        Rule::jigzinst => Ok(vec![Instr::Jigz(reg_from_op(operands[0]).unwrap(), location_from_pair(pair.into_inner().next().unwrap()).unwrap())]),
+        Rule::jigtinst => Ok(vec![Instr::Jigt(reg_from_op(operands[0]).unwrap(), operands[1], operands[2])]),
+        Rule::bigtinst => Ok(vec![Instr::Bigt(reg_from_op(operands[0]).unwrap(), operands[1], location_from_pair(pair).unwrap())]),
 
         Rule::noopinst => Ok(vec![Instr::Noop()]),
         Rule::haltinst => Ok(vec![Instr::Halt()]),
 
-        Rule::label => Err("LOCATION NOT IMPLEMENTED"),
+        Rule::label => {println!("{} is a label", pair.as_str()); Err("LOCATION NOT IMPLEMENTED")}
         _ => {return parse_pairs(pair.into_inner())}
     }
 }

@@ -1,3 +1,5 @@
+use core::fmt;
+
 pub type Register = u8;
 pub type Immediate = i64;
 // pub type Label = String;
@@ -16,13 +18,23 @@ impl Operand {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct State {
     pub prog_counter: Register,
     pub instr_reg: Instr,
     pub registers: [i64; 8],
     pub memory: Box<[i64; MEMSIZE]>,
     pub counter: u64
+}
+impl fmt::Debug for State { // to not print out all of memory on debug
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("")
+        .field(&self.counter)
+        .field(&self.instr_reg)
+        .field(&self.prog_counter)
+        .field(&self.registers)
+        .finish()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +61,10 @@ pub enum Instr {
     Bilz(Register, Operand),
     Bilt(Register, Operand, Operand),
     Jilt(Register, Operand, Operand),
+    Jigz(Register, Operand),
+    Bigz(Register, Operand),
+    Bigt(Register, Operand, Operand),
+    Jigt(Register, Operand, Operand),
 
     Noop(),
     Halt()
