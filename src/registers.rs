@@ -1,0 +1,1 @@
+type register_file = [i64; REGISTERS];

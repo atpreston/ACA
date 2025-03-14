@@ -5,6 +5,7 @@ pub type Immediate = i64;
 // pub type Label = String;
 
 pub const MEMSIZE: usize = 2048;
+pub const REGISTERS: usize = 8;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Operand {Reg(Register), Imm(Immediate)}
@@ -22,7 +23,7 @@ impl Operand {
 pub struct State {
     pub prog_counter: Register,
     pub instr_reg: Instr,
-    pub registers: [i64; 8],
+    pub registers: [i64; REGISTERS],
     pub memory: Box<[i64; MEMSIZE]>,
     pub counter: u64
 }
