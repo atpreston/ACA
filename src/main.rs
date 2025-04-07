@@ -1,7 +1,8 @@
 mod parser;
 mod processor;
 mod decode;
-mod execution_unit;
+mod execution;
+mod reservation;
 
 use std::env;
 
