@@ -8,7 +8,7 @@ use std::{collections::HashMap, *};
 struct MyParser;
 
 fn string_to_reg(string: &str) -> Operand {
-    let reg: Register = string.trim().parse::<Register>().unwrap_or_else(|_| panic!("Register value {string} cannot be converted to u8"));
+    let reg: u8 = string.trim().parse::<u8>().unwrap_or_else(|_| panic!("Register value {string} cannot be converted to u8"));
     return Operand::Reg(reg);
 }
 

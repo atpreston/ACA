@@ -1,7 +1,11 @@
-use crate::processor::*;
+use either::Either;
 
-pub const RES_NUM: usize = 4;
-pub struct ReservationStation {
+use crate::processor::*;
+use crate::registers::*;
+
+pub const STATION_NUM: usize = 4;
+pub const SLOT_NUM: usize = 8;
+pub struct ReservationSlot {
     pub op : Instr,     // instruction to be performed
     pub qj : u8,        // reservation station that will produce the source operand value
     pub qk : u8,
@@ -11,16 +15,32 @@ pub struct ReservationStation {
     pub busy : bool     // indicates the slot and execution unit are busy
 }
 
-pub struct ReservationFile {
-    slots: [ReservationStation; RES_NUM]
+pub struct ReservationStation {
+    pub slots: [ReservationSlot; SLOT_NUM]
 }
 
 pub struct CDB {
-    bus: Vec<Instr>
+    bus: Vec<(i64, u8)>
 }
 
-impl ReservationFile {
-    pub fn issue(inst: Instr) -> bool {
-        false
+impl ReservationStation {
+    pub fn issue(self, inst: Instr, registers: [Register; REGISTERS]) -> bool {
+        let mut slot_index: usize;
+        let mut slot: &ReservationSlot;
+        let mut free = false;
+        for (i, possible_slot) in self.slots.iter().enumerate() {
+            if possible_slot.busy == false {
+                slot_index = i;
+                slot = possible_slot;
+                free = true;
+            }
+        }
+        if !free {false}
+        else {
+            slot = &ReservationSlot{op: inst, qj: todo!(), qk: todo!(), vj: todo!(), vk: todo!(), a: todo!(), busy: true};
+            
+            todo!(); // initialise rest of slot
+            return true;
+        }
     }
 }

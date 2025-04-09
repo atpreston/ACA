@@ -3,6 +3,7 @@ mod processor;
 mod decode;
 mod execution;
 mod reservation;
+mod registers;
 
 use std::env;
 
