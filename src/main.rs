@@ -1,24 +1,25 @@
-mod parser;
-mod processor;
 mod decode;
 mod execution;
-mod reservation;
+mod parser;
+mod processor;
 mod registers;
+mod reservation;
 
 use std::env;
 
-use processor::*;
 use decode::*;
+use execution::ExecutionUnit;
+use processor::*;
 
 use rand::prelude::*;
+use reservation::CDB;
 
 fn memory_stage(state: State) -> State {
-    state 
+    state
     // TODO: This does nothing yet
 }
 
-fn instruction_cycle(init_state: State, program : &Vec<Instr>) -> State {
-
+fn instruction_cycle(init_state: State, program: &Vec<Instr>) -> State {
     let mut ret_state = init_state.clone();
     // Fetch
     ret_state.instr_reg = program[ret_state.prog_counter as usize].clone();
@@ -28,7 +29,7 @@ fn instruction_cycle(init_state: State, program : &Vec<Instr>) -> State {
     ret_state = decode(ret_state);
 
     // Execute (done in execution units)
-    
+
     // Memory
     ret_state = memory_stage(ret_state);
     // Writeback
@@ -46,9 +47,17 @@ fn main() {
     let program: Vec<Instr> = load_program(path);
     println!("{:?}", program);
 
-    let prog_counter : i64 = 0;
-    let mut instr_reg : Instr = program[prog_counter as usize].clone();
-    let mut state : State = State{prog_counter: 0, instr_reg: instr_reg.clone(), registers: [0; REGISTERS], memory: Box::new([0; MEMSIZE]), counter: 0};
+    let prog_counter: i64 = 0;
+    let mut instr_reg: Instr = program[prog_counter as usize].clone();
+    let mut state: State = State {
+        prog_counter: 0,
+        instr_reg: instr_reg.clone(),
+        registers: [0; REGISTERS],
+        memory: Box::new([0; MEMSIZE]),
+        counter: 0,
+        cdb: vec![],
+        execution_units: Box::new([ExecutionUnit::new(); EXECUTIONUNITS]),
+    };
 
     let mut rng = rand::rng();
     for i in 1..state.memory.len() {
