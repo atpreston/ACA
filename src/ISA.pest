@@ -18,32 +18,24 @@ orinst = {^"or" ~ binop}
 xorinst = {^"xor" ~ binop}
 
 cpinst = {^"cp" ~ register ~ operand}
-mvinst = {^"mv" ~ register ~ immediate}
 
 ldinst = {^"ld" ~ register ~ operand}
-ldrinst = {^"ldr" ~ register ~ operand ~ operand}
 stinst = {^"st" ~ operand ~ operand}
 
-bilzinst = {^"bilz" ~ register ~ location}
-jilzinst = {^"jilz" ~ register ~ operand}
-biltinst = {^"bilt" ~ register ~ operand ~ location}
-jiltinst = {^"jilt" ~ register ~ operand ~ operand}
-bigzinst = {^"bigz" ~ register ~ location}
-jigzinst = {^"jigz" ~ register ~ operand}
-bigtinst = {^"bigt" ~ register ~ operand ~ location}
-jigtinst = {^"jigt" ~ register ~ operand ~ operand}
-binst = {^"b" ~ location}
 jinst = {^"j" ~ operand}
+bigzinst = {^"bigz" ~ immediate ~ register}
+bilzinst = {^"bilz" ~ immediate ~ register}
+biezinst = {^"biez" ~ immediate ~ register}
+
 
 noopinst = {^"noop"}
 haltinst = {^"halt"}
 
 instruction = _{addinst | subinst | mulinst | notinst | andinst | orinst | xorinst |
-    cpinst | mvinst |
-    ldinst | ldrinst | stinst |
-    bilzinst | jilzinst | biltinst | jiltinst |
-    bigzinst | jigzinst | bigtinst | jigtinst |
-    binst | jinst |
+    cpinst |
+    ldinst | stinst |
+    bilzinst | bigzinst | biezinst |
+    jinst |
     noopinst | haltinst}
 
 program = {((instruction | label) ~ NEWLINE+)* ~ (instruction | label) ~ WHITESPACE*}

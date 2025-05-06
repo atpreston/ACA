@@ -4,13 +4,15 @@ use either::*;
 use crate::execution::ExecutionUnit;
 use crate::reservation::*;
 
-pub type Register = Either<i64, u8>;
+pub type RegisterVal = Either<i64, u8>;
+pub type RegisterIndex = u8;
 pub type Immediate = i64;
+pub type MemoryIndex = u8;
 // pub type Label = String;
 
 pub const MEMSIZE: usize = 2048;
 pub const REGISTERS: usize = 8;
-pub const EXECUTIONUNITS: usize = 4;
+pub const EXECUTIONUNITS: usize = 1;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Operand {
@@ -19,7 +21,7 @@ pub enum Operand {
 }
 impl Operand {
     /// returns the value stored by an operand (immediate, or register's value)
-    pub fn extract(&self, registers: &[Register; REGISTERS]) -> Either<i64, u8> {
+    pub fn extract(&self, registers: &[RegisterVal; REGISTERS]) -> Either<i64, u8> {
         match self {
             Operand::Imm(val) => return Left(*val),
             Operand::Reg(ind) => {
@@ -30,11 +32,11 @@ impl Operand {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub struct State {
     pub prog_counter: u8,
     pub instr_reg: Instr,
-    pub registers: [i64; REGISTERS],
+    pub registers: [RegisterVal; REGISTERS],
     pub memory: Box<[i64; MEMSIZE]>,
     pub counter: u64,
 
@@ -49,41 +51,45 @@ impl fmt::Debug for State {
             .field(&self.instr_reg)
             .field(&self.prog_counter)
             .field(&self.registers)
+            .field(&self.execution_units)
             .finish()
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Instr {
     // instructions are of the form output input (input)
-    Add(Register, Operand, Operand),
-    Sub(Register, Operand, Operand),
-    Mul(Register, Operand, Operand),
+    Add(RegisterIndex, Operand, Operand),
+    Sub(RegisterIndex, Operand, Operand),
+    Mul(RegisterIndex, Operand, Operand),
 
-    Not(Register, Operand),
-    And(Register, Operand, Operand),
-    Or(Register, Operand, Operand),
-    Xor(Register, Operand, Operand),
+    Not(RegisterIndex, Operand),
+    And(RegisterIndex, Operand, Operand),
+    Or(RegisterIndex, Operand, Operand),
+    Xor(RegisterIndex, Operand, Operand),
 
-    Cp(Register, Operand),
+    Cp(RegisterIndex, Operand),
 
-    Ld(Register, Operand),
-    Ldr(Register, Operand, Operand),
+    Ld(MemoryIndex, Operand),
     St(Operand, Operand),
 
-    B(Operand),
-    J(Operand),
-    Jilz(Register, Operand),
-    Bilz(Register, Operand),
-    Bilt(Register, Operand, Operand),
-    Jilt(Register, Operand, Operand),
-    Jigz(Register, Operand),
-    Bigz(Register, Operand),
-    Bigt(Register, Operand, Operand),
-    Jigt(Register, Operand, Operand),
+    Bigz(Immediate, RegisterIndex),
+    Bilz(Immediate, RegisterIndex),
+    Biez(Immediate, RegisterIndex),
+    J(Immediate),
 
     Noop(),
     Halt(),
+}
+
+fn resolve_dest(dest: Option<u8>) -> Result<RegisterIndex, String> {
+    match dest {
+        Some(u) => Ok(u),
+        _ => Err(
+            "Attempt to resolve a destination from a instruction that does not write to one"
+                .to_string(),
+        ),
+    }
 }
 
 impl Instr {
@@ -91,76 +97,44 @@ impl Instr {
         self,
         vj: i64,
         vk: i64,
-        dest: u8,
-        mut registers: &[Register; REGISTERS],
-        memory: Box<[i64; 2048]>,
-        mut prog_counter: u8,
+        dest: Option<u8>,
+        registers: &mut [RegisterVal; REGISTERS],
+        memory: &mut [i64; 2048],
+        prog_counter: &mut u8,
     ) -> () {
         match self {
-            Instr::Add(..) => registers[dest as usize] = Left(vj + vk),
-            Instr::Sub(..) => registers[dest as usize] = Left(vj - vk),
-            Instr::Mul(..) => registers[dest as usize] = Left(vj * vk),
+            Instr::Add(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj + vk),
+            Instr::Sub(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj - vk),
+            Instr::Mul(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj * vk),
 
-            Instr::Not(..) => registers[dest as usize] = Left(!vj),
-            Instr::And(..) => registers[dest as usize] = Left(vj & vk),
-            Instr::Or(..) => registers[dest as usize] = Left(vj | vk),
-            Instr::Xor(..) => registers[dest as usize] = Left(vj ^ vk),
+            Instr::Not(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(!vj),
+            Instr::And(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj & vk),
+            Instr::Or(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj | vk),
+            Instr::Xor(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj ^ vk),
 
-            Instr::Cp(..) => registers[dest as usize] = Left(vj),
-            Instr::Ld(..) => registers[dest as usize] = Left(vj),
-            Instr::Ldr(..) => registers[dest as usize] = Left(memory[(vj + vk) as usize]),
-            Instr::St(..) => memory[dest as usize] = vj,
+            Instr::Cp(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj),
+            Instr::Ld(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj),
+            Instr::St(..) => memory[resolve_dest(dest).unwrap() as usize] = vj,
 
-            Instr::B(..) => prog_counter = vj as u8,
             Instr::Bilz(..) => {
-                if registers[dest as usize] < 0 {
-                    prog_counter = vj as u8
-                }
-            }
-            Instr::Bilt(..) => {
-                if registers[dest as usize] < vj {
-                    prog_counter = vk as u8
+                if vj < 0 {
+                    *prog_counter = vk as u8
                 }
             }
             Instr::Bigz(..) => {
-                if registers[dest as usize] > 0 {
-                    prog_counter = vj as u8
+                if vk > 0 {
+                    *prog_counter = vj as u8
                 }
             }
-            Instr::Bigt(..) => {
-                if registers[dest as usize] > vj {
-                    prog_counter = vk as u8
-                }
-            }
-            Instr::J(..) => prog_counter += vj as u8,
-            Instr::Jilz(..) => {
-                if registers[dest as usize] < 0 {
-                    prog_counter += vj as u8
-                }
-            }
-            Instr::Jilt(..) => {
-                if registers[dest as usize] < vj {
-                    prog_counter += vk as u8
-                }
-            }
-            Instr::Jigz(..) => {
-                if registers[dest as usize] > 0 {
-                    prog_counter += vj as u8
-                }
-            }
-            Instr::Jigt(..) => {
-                if registers[dest as usize] > vj {
-                    prog_counter += vk as u8
-                }
-            }
-
+            Instr::Biez(..) => {}
+            Instr::J(..) => *prog_counter += vj as u8,
             Instr::Noop() => (),
-            Instr::Halt() => prog_counter = 0,
+            Instr::Halt() => *prog_counter = 0,
         }
         return;
     }
 
-    pub fn get_operands(self, registers: &[Register; REGISTERS]) -> Vec<Either<i64, u8>> {
+    pub fn get_operands(self, registers: &[RegisterVal; REGISTERS]) -> Vec<Either<i64, u8>> {
         match self {
             Instr::Add(_, operand, operand1) => {
                 vec![operand.extract(registers), operand1.extract(registers)]
@@ -183,34 +157,17 @@ impl Instr {
             }
             Instr::Cp(_, operand) => vec![operand.extract(registers)],
             Instr::Ld(_, operand) => vec![operand.extract(registers)],
-            Instr::Ldr(_, operand, operand1) => {
-                vec![operand.extract(registers), operand1.extract(registers)]
-            }
             Instr::St(_, operand) => vec![operand.extract(registers)],
-            Instr::B(_) => vec![],
             Instr::J(_) => vec![],
-            Instr::Jilz(_, operand) => vec![operand.extract(registers)],
-            Instr::Bilz(_, operand) => vec![operand.extract(registers)],
-            Instr::Bilt(_, operand, operand1) => {
-                vec![operand.extract(registers), operand1.extract(registers)]
-            }
-            Instr::Jilt(_, operand, operand1) => {
-                vec![operand.extract(registers), operand1.extract(registers)]
-            }
-            Instr::Jigz(_, operand) => vec![operand.extract(registers)],
-            Instr::Bigz(_, operand) => vec![operand.extract(registers)],
-            Instr::Bigt(_, operand, operand1) => {
-                vec![operand.extract(registers), operand1.extract(registers)]
-            }
-            Instr::Jigt(_, operand, operand1) => {
-                vec![operand.extract(registers), operand1.extract(registers)]
-            }
+            Instr::Bilz(_, operand) => vec![Right(operand)],
+            Instr::Bigz(_, operand) => vec![Right(operand)],
+            Instr::Biez(_, operand) => vec![Right(operand)],
             Instr::Noop() => vec![],
             Instr::Halt() => vec![],
         }
     }
 
-    pub fn get_location(self) -> Option<Either<i64, u8>> {
+    pub fn get_location(self) -> Option<u8> {
         match self {
             Instr::Add(loc, ..) => Some(loc),
             Instr::Sub(loc, ..) => Some(loc),
@@ -221,7 +178,6 @@ impl Instr {
             Instr::Xor(loc, ..) => Some(loc),
             Instr::Cp(loc, ..) => Some(loc),
             Instr::Ld(loc, ..) => Some(loc),
-            Instr::Ldr(loc, ..) => Some(loc),
             _ => None,
         }
     }

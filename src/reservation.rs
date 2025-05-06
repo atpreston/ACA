@@ -1,88 +1,99 @@
-use either::Either;
+use core::fmt;
+
+use either::Either::{self, *};
 
 use crate::processor::*;
 
-pub const STATION_NUM: usize = 4;
-pub const SLOT_NUM: usize = 8;
+pub const SLOT_NUM: usize = 1;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct ReservationSlot {
-    pub op: Instr, // instruction to be performed
-    pub qj: u8,    // reservation station that will produce the source operand value
-    pub qk: u8,
-    pub vj: i64, // source operand value
-    pub vk: i64,
-    pub a: i64,     //used to hold information about memory address calculation
+    pub op: Instr,          // instruction to be performed
+    pub j: Either<i64, u8>, // Either the source operand value, or the reservation station that will produce the source operand value
+    pub k: Either<i64, u8>,
     pub busy: bool, // indicates the slot and execution unit are busy
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+impl ReservationSlot {
+    pub fn new() -> ReservationSlot {
+        return ReservationSlot {
+            op: Instr::Noop(),
+            j: Left(0),
+            k: Left(0),
+            busy: false,
+        };
+    }
+}
+
+impl fmt::Debug for ReservationSlot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("")
+            .field(&self.j)
+            .field(&self.k)
+            .field(&self.busy)
+            .finish()
+    }
+}
+
+impl fmt::Display for ReservationSlot {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "operand: {:?}, j: {}, k: {}, busy: {}",
+            self.op, self.j, self.k, self.busy
+        )
+    }
+}
+#[derive(PartialEq, Eq)]
 pub struct ReservationStation {
     pub slots: [ReservationSlot; SLOT_NUM],
+}
+
+impl fmt::Debug for ReservationStation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("").field(&self.slots).finish()
+    }
 }
 
 pub type CDB = Vec<(i64, u8)>;
 
 impl ReservationStation {
-    pub fn issue(mut self, inst: Instr, registers: [Register; REGISTERS]) -> bool {
+    pub fn issue(&mut self, inst: Instr, registers: &[RegisterVal; REGISTERS]) -> bool {
         let mut slot_index: Option<usize> = None;
-        for (i, possible_slot) in self.slots.iter().enumerate() {
+        // if self
+        //     .slots
+        //     .iter()
+        //     .any(|x: &ReservationSlot| -> bool { x.busy })
+        // {
+        //     println!("ONE SLOT BUSY");
+        // }
+        for (i, possible_slot) in self.slots.iter_mut().enumerate() {
             if possible_slot.busy == false {
                 slot_index = Some(i);
+                println!("issuing on slot {}", i);
+                break;
             }
         }
         match slot_index {
             None => false,
             Some(i) => {
                 // initialise slot
-                let operands: Vec<Either<i64, u8>> = inst.get_operands(&registers);
-                let (qj, qk): (u8, u8);
-                let (vj, vk): (i64, i64);
-                if operands.len() == 1 {
-                    let op = operands[0];
-                    match op {
-                        either::Left(imm) => {
-                            qj = 0;
-                            qk = 0;
-                            vj = imm;
-                            vk = 0
-                        }
-                        either::Right(addr) => {
-                            qj = addr;
-                            qk = 0;
-                            vj = 0;
-                            vk = 0
-                        }
-                    }
-                } else {
-                    match operands[0] {
-                        Either::Left(imm) => {
-                            qj = 0;
-                            vj = imm
-                        }
-                        Either::Right(addr) => {
-                            qj = addr;
-                            vj = 0
-                        }
-                    }
-                    match operands[1] {
-                        Either::Left(imm) => {
-                            qk = 0;
-                            vk = imm
-                        }
-                        Either::Right(addr) => {
-                            qk = addr;
-                            vk = 0
-                        }
-                    }
+                let operands: Vec<Either<i64, u8>> = inst.clone().get_operands(&registers);
+                let (mut j, mut k): (Either<i64, u8>, Either<i64, u8>) = (Left(0), Left(0));
+                if let [jval] = *operands {
+                    {
+                        j = jval
+                    };
+                }
+                if let [_, kval] = *operands {
+                    {
+                        k = kval
+                    };
                 }
                 self.slots[i] = ReservationSlot {
                     op: inst,
-                    qj: qj,
-                    qk: qk,
-                    vj: vj,
-                    vk: vk,
-                    a: 0,
+                    j: j,
+                    k: k,
                     busy: true,
                 };
                 return true;

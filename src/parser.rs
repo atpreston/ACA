@@ -1,4 +1,4 @@
-use crate::processor::{Immediate, Instr, Operand, Program, Register};
+use crate::processor::{Immediate, Instr, Operand, Program, RegisterIndex};
 use pest::{iterators::Pairs, Parser};
 use pest_derive::Parser;
 
@@ -41,7 +41,7 @@ fn location_from_pair(pair: pest::iterators::Pair<'_, Rule>) -> Result<Operand, 
     match pair.as_rule() {
         Rule::register => {
             return Ok(Operand::Reg(
-                pair.as_str()[1..].parse::<Register>().unwrap(),
+                pair.as_str()[1..].parse::<RegisterIndex>().unwrap(),
             ))
         }
         Rule::immediate => Ok(Operand::Imm(
@@ -52,14 +52,14 @@ fn location_from_pair(pair: pest::iterators::Pair<'_, Rule>) -> Result<Operand, 
     }
 }
 
-fn reg_from_op(op: Operand) -> Result<Register, &'static str> {
+fn reg_from_op(op: Operand) -> Result<RegisterIndex, &'static str> {
     match op {
         Operand::Reg(reg) => Ok(reg),
         _ => Err("Cannot convert immediate to register"),
     }
 }
 
-fn destination_from_operands(ops: &Vec<Operand>) -> Result<Register, &'static str> {
+fn destination_from_operands(ops: &Vec<Operand>) -> Result<RegisterIndex, &'static str> {
     if ops.len() > 0 {
         return reg_from_op(ops[0]);
     } else {
@@ -129,7 +129,7 @@ fn parse_pairs(pairs: pest::iterators::Pairs<'_, Rule>) -> Result<Program, &'sta
 fn parse_pair(pair: pest::iterators::Pair<'_, Rule>) -> Result<Program, &'static str> {
     let operands = build_from_pairs(pair.clone()).expect("Cannot recover operands");
     let destination = destination_from_operands(&operands);
-    let unwrap_dest =
+    let unwrap_dest: u8 =
         destination.unwrap_or_else(|_| panic!("Destination {destination:#?} cannot be recovered"));
     match pair.as_rule() {
         Rule::addinst => Ok(vec![Instr::Add(unwrap_dest, operands[1], operands[2])]),
@@ -143,48 +143,10 @@ fn parse_pair(pair: pest::iterators::Pair<'_, Rule>) -> Result<Program, &'static
 
         Rule::cpinst => Ok(vec![Instr::Cp(unwrap_dest, operands[1])]),
         Rule::ldinst => Ok(vec![Instr::Ld(unwrap_dest, operands[1])]),
-        Rule::ldrinst => Ok(vec![Instr::Ldr(unwrap_dest, operands[1], operands[2])]),
-        Rule::stinst => Ok(vec![Instr::St(operands[0], operands[1])]),
-
-        Rule::binst => Ok(vec![Instr::B(
-            location_from_pair(pair.into_inner().next().unwrap()).unwrap(),
-        )]),
         Rule::jinst => Ok(vec![Instr::J(operands[1])]),
         Rule::bilzinst => Ok(vec![Instr::Bilz(
-            reg_from_op(operands[0]).unwrap(),
-            operands[1],
-        )]),
-        Rule::jilzinst => Ok(vec![Instr::Jilz(
-            reg_from_op(operands[0]).unwrap(),
-            location_from_pair(pair.into_inner().next().unwrap()).unwrap(),
-        )]),
-        Rule::jiltinst => Ok(vec![Instr::Jilt(
-            reg_from_op(operands[0]).unwrap(),
-            operands[1],
-            operands[2],
-        )]),
-        Rule::biltinst => Ok(vec![Instr::Bilt(
-            reg_from_op(operands[0]).unwrap(),
-            operands[1],
-            location_from_pair(pair).unwrap(),
-        )]), // TODO: THIS WILL NOT WORK - LOCATION IS WRONG
-        Rule::bigzinst => Ok(vec![Instr::Bigz(
-            reg_from_op(operands[0]).unwrap(),
-            operands[1],
-        )]),
-        Rule::jigzinst => Ok(vec![Instr::Jigz(
-            reg_from_op(operands[0]).unwrap(),
-            location_from_pair(pair.into_inner().next().unwrap()).unwrap(),
-        )]),
-        Rule::jigtinst => Ok(vec![Instr::Jigt(
-            reg_from_op(operands[0]).unwrap(),
-            operands[1],
-            operands[2],
-        )]),
-        Rule::bigtinst => Ok(vec![Instr::Bigt(
-            reg_from_op(operands[0]).unwrap(),
-            operands[1],
-            location_from_pair(pair).unwrap(),
+            unwrap_dest,
+            operands[1]
         )]),
 
         Rule::noopinst => Ok(vec![Instr::Noop()]),
