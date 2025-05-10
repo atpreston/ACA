@@ -4,7 +4,20 @@ use either::*;
 use crate::execution::ExecutionUnit;
 use crate::reservation::*;
 
-pub type RegisterVal = Either<i64, u8>;
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum RegisterVal {
+    Val(i64),
+    Tag(u8),
+}
+impl RegisterVal {
+    pub fn to_either(self) -> Either<i64, u8> {
+        match self {
+            RegisterVal::Val(val) => Either::Left(val),
+            RegisterVal::Tag(tag) => Either::Right(tag),
+        }
+    }
+}
+
 pub type RegisterIndex = u8;
 pub type Immediate = i64;
 pub type MemoryIndex = u8;
@@ -12,22 +25,37 @@ pub type MemoryIndex = u8;
 
 pub const MEMSIZE: usize = 2048;
 pub const REGISTERS: usize = 8;
-pub const EXECUTIONUNITS: usize = 1;
+pub const EXECUTIONUNITS: usize = 5;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Operand {
     Reg(u8),
     Imm(Immediate),
 }
+
 impl Operand {
     /// returns the value stored by an operand (immediate, or register's value)
-    pub fn extract(&self, registers: &[RegisterVal; REGISTERS]) -> Either<i64, u8> {
+    pub fn extract(&self, registers: &[RegisterVal; REGISTERS]) -> RegisterVal {
         match self {
-            Operand::Imm(val) => return Left(*val),
+            Operand::Imm(val) => return RegisterVal::Val(*val),
             Operand::Reg(ind) => {
                 let reg_val = registers[*ind as usize];
                 return reg_val;
             }
+        }
+    }
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub enum ExecLocation {
+    Reg(i64, u8),
+    Mem(i64, u8),
+}
+impl ExecLocation {
+    pub fn val(&self) -> i64 {
+        match self {
+            ExecLocation::Reg(val, _) => *val,
+            ExecLocation::Mem(val, _) => *val,
         }
     }
 }
@@ -42,16 +70,21 @@ pub struct State {
 
     pub execution_units: Box<[ExecutionUnit; EXECUTIONUNITS]>,
     pub cdb: CDB,
+    pub branch_index: Option<(usize, usize)>,
 }
 impl fmt::Debug for State {
     // to not print out all of memory on debug
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("")
-            .field(&self.counter)
-            .field(&self.instr_reg)
-            .field(&self.prog_counter)
-            .field(&self.registers)
-            .field(&self.execution_units)
+            .field(&format_args!("COUNTER: {}", &self.counter))
+            .field(&format_args!(
+                "Instruction register: {:?}, Program counter: {}",
+                &self.instr_reg, &self.prog_counter
+            ))
+            .field(&format_args!("Registers: {:?}", &self.registers))
+            .field(&format_args!("EUs: {:#?}", &self.execution_units))
+            .field(&format_args!("CDB: {:?}", &self.cdb))
+            .field(&format_args!("Branch index: {:?}", &self.branch_index))
             .finish()
     }
 }
@@ -82,59 +115,63 @@ pub enum Instr {
     Halt(),
 }
 
-fn resolve_dest(dest: Option<u8>) -> Result<RegisterIndex, String> {
-    match dest {
-        Some(u) => Ok(u),
-        _ => Err(
-            "Attempt to resolve a destination from a instruction that does not write to one"
-                .to_string(),
-        ),
-    }
-}
+// fn resolve_dest(dest: Option<u8>) -> Result<RegisterIndex, String> {
+//     match dest {
+//         Some(u) => Ok(u),
+//         _ => Err(
+//             "Attempt to resolve a destination from a instruction that does not write to one"
+//                 .to_string(),
+//         ),
+//     }
+// }
 
 impl Instr {
-    pub fn execute(
-        self,
-        vj: i64,
-        vk: i64,
-        dest: Option<u8>,
-        registers: &mut [RegisterVal; REGISTERS],
-        memory: &mut [i64; 2048],
-        prog_counter: &mut u8,
-    ) -> () {
+    pub fn execute(self, vj: i64, vk: i64, prog_counter: &mut u8) -> Option<ExecLocation> {
         match self {
-            Instr::Add(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj + vk),
-            Instr::Sub(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj - vk),
-            Instr::Mul(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj * vk),
+            Instr::Add(..) => Some(ExecLocation::Reg(vj.wrapping_add(vk), 0)),
+            Instr::Sub(..) => Some(ExecLocation::Reg(vj.wrapping_sub(vk), 0)),
+            Instr::Mul(..) => Some(ExecLocation::Reg(vj.wrapping_mul(vk), 0)),
 
-            Instr::Not(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(!vj),
-            Instr::And(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj & vk),
-            Instr::Or(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj | vk),
-            Instr::Xor(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj ^ vk),
+            Instr::Not(..) => Some(ExecLocation::Reg(!vj, 0)),
+            Instr::And(..) => Some(ExecLocation::Reg(vj & vk, 0)),
+            Instr::Or(..) => Some(ExecLocation::Reg(vj | vk, 0)),
+            Instr::Xor(..) => Some(ExecLocation::Reg(vj ^ vk, 0)),
 
-            Instr::Cp(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj),
-            Instr::Ld(..) => registers[resolve_dest(dest).unwrap() as usize] = Left(vj),
-            Instr::St(..) => memory[resolve_dest(dest).unwrap() as usize] = vj,
+            Instr::Cp(..) => Some(ExecLocation::Reg(vj, 0)),
+            Instr::Ld(..) => Some(ExecLocation::Reg(vj, 0)),
+            Instr::St(..) => Some(ExecLocation::Mem(vj, 0)),
 
             Instr::Bilz(..) => {
                 if vj < 0 {
-                    *prog_counter = vk as u8
+                    *prog_counter = vk as u8;
                 }
+                None
             }
             Instr::Bigz(..) => {
                 if vk > 0 {
-                    *prog_counter = vj as u8
+                    *prog_counter = vj as u8;
                 }
+                None
             }
-            Instr::Biez(..) => {}
-            Instr::J(..) => *prog_counter += vj as u8,
-            Instr::Noop() => (),
-            Instr::Halt() => *prog_counter = 0,
+            Instr::Biez(..) => {
+                if vj == 0 {
+                    *prog_counter = vk as u8;
+                }
+                None
+            }
+            Instr::J(..) => {
+                *prog_counter += vj as u8;
+                None
+            }
+            Instr::Noop() => None,
+            Instr::Halt() => {
+                *prog_counter = u8::MAX;
+                None
+            }
         }
-        return;
     }
 
-    pub fn get_operands(self, registers: &[RegisterVal; REGISTERS]) -> Vec<Either<i64, u8>> {
+    pub fn get_operands(self, registers: &[RegisterVal; REGISTERS]) -> Vec<RegisterVal> {
         match self {
             Instr::Add(_, operand, operand1) => {
                 vec![operand.extract(registers), operand1.extract(registers)]
@@ -159,9 +196,9 @@ impl Instr {
             Instr::Ld(_, operand) => vec![operand.extract(registers)],
             Instr::St(_, operand) => vec![operand.extract(registers)],
             Instr::J(_) => vec![],
-            Instr::Bilz(_, operand) => vec![Right(operand)],
-            Instr::Bigz(_, operand) => vec![Right(operand)],
-            Instr::Biez(_, operand) => vec![Right(operand)],
+            Instr::Bilz(_, operand) => vec![RegisterVal::Tag(operand)],
+            Instr::Bigz(_, operand) => vec![RegisterVal::Tag(operand)],
+            Instr::Biez(_, operand) => vec![RegisterVal::Tag(operand)],
             Instr::Noop() => vec![],
             Instr::Halt() => vec![],
         }
@@ -182,5 +219,3 @@ impl Instr {
         }
     }
 }
-
-pub type Program = Vec<Instr>;

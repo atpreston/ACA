@@ -1,26 +1,27 @@
+use crate::processor::*;
 use core::fmt;
 
-use either::Either::{self, *};
+pub const SLOT_NUM: usize = 2;
 
-use crate::processor::*;
-
-pub const SLOT_NUM: usize = 1;
+pub type CDB = Vec<(i64, u8)>;
 
 #[derive(PartialEq, Eq, Clone)]
 pub struct ReservationSlot {
-    pub op: Instr,          // instruction to be performed
-    pub j: Either<i64, u8>, // Either the source operand value, or the reservation station that will produce the source operand value
-    pub k: Either<i64, u8>,
-    pub busy: bool, // indicates the slot and execution unit are busy
+    pub op: Instr,      // instruction to be performed
+    pub j: RegisterVal, // Either the source operand value, or the reservation station that will produce the source operand value
+    pub k: RegisterVal,
+    pub busy: bool,  // indicates the slot and execution unit are busy
+    pub ready: bool, //indicates the operands are available
 }
 
 impl ReservationSlot {
     pub fn new() -> ReservationSlot {
         return ReservationSlot {
             op: Instr::Noop(),
-            j: Left(0),
-            k: Left(0),
+            j: RegisterVal::Val(0),
+            k: RegisterVal::Val(0),
             busy: false,
+            ready: false,
         };
     }
 }
@@ -28,9 +29,11 @@ impl ReservationSlot {
 impl fmt::Debug for ReservationSlot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("")
-            .field(&self.j)
-            .field(&self.k)
-            .field(&self.busy)
+            .field(&format_args!("Op: {:?}", &self.op))
+            .field(&format_args!("j: {:?}", &self.j))
+            .field(&format_args!("k: {:?}", &self.k))
+            .field(&format_args!("busy? {}", &self.busy))
+            .field(&format_args!("ready? {}", &self.ready))
             .finish()
     }
 }
@@ -39,11 +42,48 @@ impl fmt::Display for ReservationSlot {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "operand: {:?}, j: {}, k: {}, busy: {}",
+            "operand: {:?}, j: {:?}, k: {:?}, busy: {}",
             self.op, self.j, self.k, self.busy
         )
     }
 }
+
+impl ReservationSlot {
+    pub fn tick(&mut self, cdb: &mut CDB) {
+        eprintln!(
+            "TICKING SLOT with j: {:?}, k: {:?}, ready?: {}",
+            self.j, self.k, self.ready
+        );
+        if !self.ready {
+            for (val, tag) in cdb {
+                match self.j {
+                    RegisterVal::Val(_) => (),
+                    RegisterVal::Tag(t) => {
+                        eprintln!("CHECKING {:?} AGAINST CDB VALUE {:?}", t, *tag);
+                        if *tag == t {
+                            self.j = RegisterVal::Val(*val);
+                        }
+                    }
+                }
+                match self.k {
+                    RegisterVal::Val(_) => (),
+                    RegisterVal::Tag(t) => {
+                        eprintln!("CHECKING {:?} AGAINST CDB VALUE {:?}", t, *tag);
+                        if *tag == t {
+                            self.k = RegisterVal::Val(*val);
+                        }
+                    }
+                }
+            }
+            if let (RegisterVal::Val(_), RegisterVal::Val(_)) = (self.j, self.k) {
+                self.ready = true;
+            } else {
+                self.ready = false;
+            }
+        }
+    }
+}
+
 #[derive(PartialEq, Eq)]
 pub struct ReservationStation {
     pub slots: [ReservationSlot; SLOT_NUM],
@@ -51,22 +91,20 @@ pub struct ReservationStation {
 
 impl fmt::Debug for ReservationStation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("").field(&self.slots).finish()
+        f.debug_tuple("")
+            .field(&format_args!("{:?}", &self.slots))
+            .finish()
     }
 }
 
-pub type CDB = Vec<(i64, u8)>;
-
 impl ReservationStation {
-    pub fn issue(&mut self, inst: Instr, registers: &[RegisterVal; REGISTERS]) -> bool {
+    pub fn issue(
+        &mut self,
+        inst: Instr,
+        registers: &mut [RegisterVal; REGISTERS],
+        my_index: u8,
+    ) -> Option<usize> {
         let mut slot_index: Option<usize> = None;
-        // if self
-        //     .slots
-        //     .iter()
-        //     .any(|x: &ReservationSlot| -> bool { x.busy })
-        // {
-        //     println!("ONE SLOT BUSY");
-        // }
         for (i, possible_slot) in self.slots.iter_mut().enumerate() {
             if possible_slot.busy == false {
                 slot_index = Some(i);
@@ -75,29 +113,47 @@ impl ReservationStation {
             }
         }
         match slot_index {
-            None => false,
+            None => (),
             Some(i) => {
                 // initialise slot
-                let operands: Vec<Either<i64, u8>> = inst.clone().get_operands(&registers);
-                let (mut j, mut k): (Either<i64, u8>, Either<i64, u8>) = (Left(0), Left(0));
+                let operands: Vec<RegisterVal> = inst.clone().get_operands(&registers);
+                let destination = inst.clone().get_location();
+                // println!(
+                //     "#####\nInstr: {:?}, Operands: {:?}, Destination: {:?}\n#####",
+                //     inst, operands, destination
+                // );
+                let (mut j, mut k): (RegisterVal, RegisterVal) =
+                    (RegisterVal::Val(0), RegisterVal::Val(0));
                 if let [jval] = *operands {
                     {
-                        j = jval
+                        j = jval;
                     };
                 }
-                if let [_, kval] = *operands {
+                if let [jval, kval] = *operands {
                     {
-                        k = kval
+                        j = jval;
+                        k = kval;
                     };
+                }
+                if let Some(dest) = destination {
+                    eprintln!("Deferring register {dest} to unit {}", my_index);
+                    registers[dest as usize] = RegisterVal::Tag(my_index);
                 }
                 self.slots[i] = ReservationSlot {
                     op: inst,
                     j: j,
                     k: k,
                     busy: true,
+                    ready: false,
                 };
-                return true;
             }
+        }
+        return slot_index;
+    }
+
+    pub fn tick(&mut self, cdb: &mut CDB) -> () {
+        for slot in self.slots.iter_mut() {
+            slot.tick(cdb);
         }
     }
 }

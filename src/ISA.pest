@@ -4,7 +4,7 @@ immediate = {"#" ~ ASCII_DIGIT+}
 label = @{ASCII_ALPHA+}
 
 operand = _{register | immediate}
-location = _{register | immediate | label}
+// location = _{register | immediate | label}
 
 binop = _{register ~ operand ~ operand}
 

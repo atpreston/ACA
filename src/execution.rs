@@ -1,9 +1,7 @@
 use std::fmt;
 
-use either::Either::*;
-
 use crate::processor::{self, *};
-use crate::{registers, reservation::*};
+use crate::reservation::*;
 
 const fn get_cycles(inst: Instr) -> usize {
     match inst {
@@ -26,27 +24,44 @@ const fn get_cycles(inst: Instr) -> usize {
 
 #[derive(PartialEq, Eq)]
 pub struct ExecutionUnit {
-    reservation_station: ReservationStation,
+    pub reservation_station: ReservationStation,
     tick: usize,
-    current_inst_index: usize,
+    current_slot_index: Option<usize>,
     executing: bool,
+    cdb_result: Option<(i64, u8)>,
+    pub writeback_result: Option<ExecLocation>,
 }
 
 impl fmt::Debug for ExecutionUnit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("")
-            .field(&self.reservation_station)
-            .field(&self.is_busy())
+            .field(&format_args!(
+                "Res Station: {:?}",
+                &self.reservation_station
+            ))
+            .field(&format_args!(
+                "Current instruction index: {:?}",
+                &self.current_slot_index
+            ))
+            .field(&format_args!(
+                "Writeback result: {:?}",
+                &self.writeback_result
+            ))
+            .field(&format_args!("Executing? {}", &self.executing))
+            .field(&format_args!("Tick: {}", &self.tick))
             .finish()
     }
 }
 
 impl ExecutionUnit {
-    pub fn is_busy(&self) -> bool {
+    pub fn all_free(&self) -> bool {
         self.reservation_station
             .slots
             .iter()
-            .all(|x: &ReservationSlot| -> bool { x.busy })
+            .all(|x: &ReservationSlot| -> bool { !x.busy })
+    }
+    pub fn is_slot_busy(&self, index: usize) -> bool {
+        self.reservation_station.slots[index].busy
     }
     pub fn new() -> ExecutionUnit {
         return ExecutionUnit {
@@ -54,54 +69,108 @@ impl ExecutionUnit {
                 slots: std::array::from_fn(|_| ReservationSlot::new()),
             },
             tick: 0,
-            current_inst_index: 0,
+            current_slot_index: Some(0),
             executing: false,
+            cdb_result: None,
+            writeback_result: None,
         };
     }
 
-    pub fn issue(&mut self, inst: Instr, registers: &[either::Either<i64, u8>; 8]) -> bool {
-        self.reservation_station.issue(inst, registers)
+    pub fn issue(
+        &mut self,
+        inst: Instr,
+        registers: &mut [RegisterVal; 8],
+        my_index: u8,
+        cdb: &mut CDB,
+    ) -> Option<usize> {
+        match self.reservation_station.issue(inst, registers, my_index) {
+            Some(i) => {
+                self.tick = 0;
+                self.executing = false;
+                self.current_slot_index = None;
+                cdb.retain(|x| -> bool {
+                    if x.1 == my_index {
+                        eprintln!("FLUSHING {:?}", x);
+                    }
+                    x.1 != my_index
+                });
+                return Some(i);
+            }
+            None => None,
+        }
     }
 
-    pub fn tick(
-        &mut self,
-        registers: &mut [either::Either<i64, u8>; 8],
-        memory: &mut [i64; 2048],
-        prog_counter: &mut u8,
-    ) -> bool {
-        self.tick += 1;
-        let current_slot: &mut ReservationSlot =
-            &mut self.reservation_station.slots[self.current_inst_index];
-        let current_inst: Instr = current_slot.op.clone();
-        match self.executing {
-            true => {
+    pub fn tick(&mut self, prog_counter: &mut u8, cdb: &mut CDB, index: u8) -> bool {
+        self.reservation_station.tick(cdb);
+        // eprintln!("RES STATION: {:?}", self.reservation_station);
+        // eprintln!(
+        //     "EXECUTION UNIT {:?} HAS SLOT INDEX {:?}",
+        //     index, self.current_slot_index
+        // );
+
+        match self.current_slot_index {
+            Some(slot_index) => {
+                self.tick += 1;
+                let current_slot: &mut ReservationSlot =
+                    &mut self.reservation_station.slots[slot_index];
+                let maybe_dest = current_slot.op.clone().get_location();
+                let current_inst: Instr = current_slot.op.clone();
                 // return executed value after correct number of cycles
                 if self.tick >= get_cycles(current_inst.clone()) {
-                    let destination = current_inst.clone().get_location();
-                    current_inst.execute(
-                        current_slot
-                            .j
-                            .expect_left("vj called for execution but does not exist"),
-                        current_slot
-                            .j
-                            .expect_left("vk called for execution but does not exist"),
-                        destination,
-                        registers,
-                        memory,
+                    let writeback_temp = current_inst.execute(
+                        current_slot.j.to_either().expect_left(&format!(
+                            "vj called for execution of {:?} but does not exist {:?}",
+                            current_slot.op, current_slot.j
+                        )),
+                        current_slot.k.to_either().expect_left(&format!(
+                            "vk called for execution of {:?} but does not exist {:?}",
+                            current_slot.op, current_slot.k
+                        )),
                         prog_counter,
                     );
+                    if let Some(location) = writeback_temp.clone() {
+                        self.cdb_result = Some((location.val(), index));
+                    }
                     self.tick = 0;
+                    self.current_slot_index = None;
                     current_slot.busy = false;
+                    current_slot.op = Instr::Noop();
+
+                    if let Some(destination) = maybe_dest {
+                        match writeback_temp {
+                            Some(ExecLocation::Reg(val, _)) => {
+                                self.writeback_result = Some(ExecLocation::Reg(val, destination))
+                            }
+                            Some(ExecLocation::Mem(val, _)) => {
+                                self.writeback_result = Some(ExecLocation::Mem(val, destination))
+                            }
+                            None => {}
+                        }
+                    }
                     return true;
+                } else {
+                    return false;
                 }
             }
-            false => {
-                // start executing if operands are available
-                if let (Left(_), Left(_)) = (current_slot.j, current_slot.k) {
-                    self.executing = true;
+
+            None => {
+                // get first instruction that has operands available
+                for (slot_index, slot) in self.reservation_station.slots.iter_mut().enumerate() {
+                    if slot.ready && slot.busy {
+                        self.current_slot_index = Some(slot_index);
+                        break;
+                    }
                 }
+                return false;
             }
         }
-        return false;
+    }
+
+    pub fn writeback(&mut self, cdb: &mut CDB) {
+        if let Some(pair) = self.cdb_result {
+            cdb.push(pair);
+            eprintln!("PUSHING {:?} TO CDB", pair);
+            self.cdb_result = None;
+        }
     }
 }

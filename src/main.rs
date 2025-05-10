@@ -1,8 +1,7 @@
-mod decode;
 mod execution;
 // mod parser;
 mod processor;
-mod registers;
+mod programs;
 mod reservation;
 mod user;
 
@@ -12,45 +11,88 @@ mod user;
 use execution::ExecutionUnit;
 use processor::*;
 
+use programs::load_program;
 use rand::prelude::*;
-use user::UserState;
+use user::UserMode;
 
-fn memory_stage(state: State) -> State {
-    state
-    // TODO: This does nothing yet
-}
+fn instruction_cycle(state: &mut State, program: &Vec<Instr>, halted: bool) -> () {
+    // execute
+    for (index, execution_unit) in state.execution_units.iter_mut().enumerate() {
+        execution_unit.tick(&mut state.prog_counter, &mut state.cdb, index as u8);
+    }
 
-fn instruction_cycle(state: &mut State, program: &Vec<Instr>, user_state: &mut UserState) -> () {
-    //let init_state: State = state.clone();
-    // Fetch
-    state.instr_reg = program[state.prog_counter as usize].clone();
-
-    // Decode/dispatch
-    // state = decode(state);
+    // writeback
     for execution_unit in state.execution_units.iter_mut() {
-        let successful_issue = execution_unit.issue(state.instr_reg.clone(), &state.registers);
-        if successful_issue {
-            state.prog_counter += 1;
-            break;
+        execution_unit.writeback(&mut state.cdb);
+        if let Some(exec_location) = execution_unit.writeback_result.clone() {
+            match exec_location {
+                ExecLocation::Reg(val, index) => {
+                    state.registers[index as usize] = RegisterVal::Val(val)
+                }
+                ExecLocation::Mem(val, index) => state.memory[index as usize] = val,
+            }
+            execution_unit.writeback_result = None;
         }
     }
 
-    // Execute (done in execution units)
     for execution_unit in state.execution_units.iter_mut() {
-        execution_unit.tick(
-            &mut state.registers,
-            &mut state.memory,
-            &mut state.prog_counter,
-        );
+        execution_unit.reservation_station.tick(&mut state.cdb); //
     }
 
-    // Memory
-    // state = memory_stage(state); DOES NOTHING YET
+    // Fetch
+    if !halted {
+        if let Some(instr) = program.get(state.prog_counter as usize) {
+            state.instr_reg = instr.clone();
+        }
+    }
 
-    // Writeback
-    //println!("{:?}, {:?}", init_state.clone(), *state);
+    // decode/issue
+    if !halted {
+        match state.branch_index {
+            Some((exec_index, slot_index)) => {
+                // if a branch instruction was executing
+                if !state.execution_units[exec_index].is_slot_busy(slot_index) {
+                    // check if it still is
+                    state.branch_index = None; // if it isn't then update the index
+                }
+            }
+            None => {
+                // if there's no branch instruction currently executing
+                for (exec_index, execution_unit) in state.execution_units.iter_mut().enumerate() {
+                    // iterate over the execution units
+                    match execution_unit.issue(
+                        state.instr_reg.clone(),
+                        &mut state.registers,
+                        exec_index as u8,
+                        &mut state.cdb,
+                    ) {
+                        // try to issue to the unit
+                        Some(slot_index) => {
+                            // if we did issue to a slot...
+                            match state.instr_reg {
+                                // update branch index if branch instruction sent
+                                Instr::Biez(_, _) => {
+                                    state.branch_index = Some((exec_index, slot_index));
+                                }
+                                Instr::Bigz(_, _) => {
+                                    state.branch_index = Some((exec_index, slot_index));
+                                }
+                                Instr::Bilz(_, _) => {
+                                    state.branch_index = Some((exec_index, slot_index));
+                                }
+                                _ => (),
+                            }
+                            state.prog_counter = state.prog_counter.saturating_add(1); // saturating add because Halt could have executed - Halt just sets PC to u8::MAX
+                            break;
+                        }
+                        None => (), // if we didn't issue the slot must have been busy, so let the for loop try the next one
+                    };
+                }
+            }
+        }
+    }
+    eprintln!("{:?}", state);
 
-    user_state.wait(); // implements stepping through/running the program
     return;
 }
 
@@ -58,40 +100,63 @@ fn instruction_cycle(state: &mut State, program: &Vec<Instr>, user_state: &mut U
 //     return parser::parse(path).expect("Cannot parse program");
 // }
 
+fn wait(user_mode: &mut UserMode) {
+    match user_mode.wait() {
+        false => (),
+        true => {
+            // eprintln!("Keyboard Interrupt");
+            std::process::exit(0)
+        }
+    };
+}
+
 fn main() {
-    let mut user_state = UserState { stepping: true };
+    let mut user_state = UserMode::new();
 
     // let args: Vec<String> = env::args().collect();
     // let path = args.get(2).map(String::as_str).unwrap_or("./program.txt");
     // let program: Vec<Instr> = load_program(path);
-    let program = vec![
-        Instr::Ld(0, Operand::Imm(2)),
-        Instr::Ld(1, Operand::Imm(5)),
-        Instr::Mul(0, Operand::Reg(0), Operand::Reg(1)),
-        Instr::Halt(),
-    ];
+    let program: Vec<Instr> = load_program("multest");
     println!("{:?}\n\n", program);
 
     let prog_counter: i64 = 0;
-    let mut instr_reg: Instr = program[prog_counter as usize].clone();
+    let instr_reg: Instr = program[prog_counter as usize].clone();
     let mut state: State = State {
         prog_counter: 0,
-        instr_reg: instr_reg.clone(),
-        registers: [either::Either::Left(0); REGISTERS],
+        instr_reg: instr_reg,
+        registers: [RegisterVal::Val(0); REGISTERS],
         memory: Box::new([0; MEMSIZE]),
         counter: 0,
         cdb: vec![],
         execution_units: Box::new(std::array::from_fn(|_| ExecutionUnit::new())),
+        branch_index: None,
     };
 
     let mut rng = rand::rng();
     for i in 1..state.memory.len() {
         state.memory[i] = rng.random::<i64>();
     }
-    while instr_reg != (Instr::Halt()) {
-        instruction_cycle(&mut state, &program, &mut user_state);
-        instr_reg = state.instr_reg.clone();
-        println!("{:?}", instr_reg);
+    while state.prog_counter < u8::MAX {
+        instruction_cycle(&mut state, &program, false);
+        state.counter += 1;
+        // println!("{:?}\n", state.instr_reg);
+
+        // implements user being able to step through/run the program
+        wait(&mut user_state);
+    }
+
+    eprintln!("HALTED");
+
+    // once halted, wait until all execution units have finished
+    while !state
+        .execution_units
+        .iter()
+        .all(|x: &ExecutionUnit| -> bool { x.all_free() })
+    {
+        instruction_cycle(&mut state, &program, true);
+        // println!("{:?}\n", state.instr_reg);
+        wait(&mut user_state);
     }
     println!("{:?}", state);
+    println!("PROGRAM COMPLETE in {} cycles", state.counter);
 }
