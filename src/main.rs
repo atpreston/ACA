@@ -16,27 +16,33 @@ use rand::prelude::*;
 use user::UserMode;
 
 fn instruction_cycle(state: &mut State, program: &Vec<Instr>, halted: bool) -> () {
+    eprintln!("\n");
     // execute
     for (index, execution_unit) in state.execution_units.iter_mut().enumerate() {
         execution_unit.tick(&mut state.prog_counter, &mut state.cdb, index as u8);
     }
 
     // writeback
-    for execution_unit in state.execution_units.iter_mut() {
+    for (eu_index, execution_unit) in state.execution_units.iter_mut().enumerate() {
         execution_unit.writeback(&mut state.cdb);
         if let Some(exec_location) = execution_unit.writeback_result.clone() {
             match exec_location {
-                ExecLocation::Reg(val, index) => {
-                    state.registers[index as usize] = RegisterVal::Val(val)
+                (ExecLocation::Reg(val, index), slot_index) => {
+                    if state.registers[index as usize]
+                        == RegisterVal::Tag((eu_index as u8, slot_index as u8))
+                    {
+                        // if the register hasn't been written to by another instruction since this one issued
+                        state.registers[index as usize] = RegisterVal::Val(val)
+                    }
                 }
-                ExecLocation::Mem(val, index) => state.memory[index as usize] = val,
+                (ExecLocation::Mem(val, index), _) => state.memory[index as usize] = val,
             }
             execution_unit.writeback_result = None;
         }
     }
 
     for execution_unit in state.execution_units.iter_mut() {
-        execution_unit.reservation_station.tick(&mut state.cdb); //
+        execution_unit.reservation_station.tick(&mut state.cdb); // updates slots to take values from cdb
     }
 
     // Fetch
@@ -57,36 +63,63 @@ fn instruction_cycle(state: &mut State, program: &Vec<Instr>, halted: bool) -> (
                 }
             }
             None => {
-                // if there's no branch instruction currently executing
-                for (exec_index, execution_unit) in state.execution_units.iter_mut().enumerate() {
-                    // iterate over the execution units
-                    match execution_unit.issue(
-                        state.instr_reg.clone(),
-                        &mut state.registers,
-                        exec_index as u8,
-                        &mut state.cdb,
-                    ) {
-                        // try to issue to the unit
-                        Some(slot_index) => {
-                            // if we did issue to a slot...
-                            match state.instr_reg {
-                                // update branch index if branch instruction sent
-                                Instr::Biez(_, _) => {
-                                    state.branch_index = Some((exec_index, slot_index));
+                // rewriting to issue to the execution unit with the lowest number of available slots
+                let mut best_eu_index: Option<usize> = None;
+                let mut mostfreeslots = 0;
+                for (eu_index, execution_unit) in state.execution_units.iter().enumerate() {
+                    let free_slots = execution_unit
+                        .reservation_station
+                        .slots
+                        .iter()
+                        .filter(|x: &&reservation::ReservationSlot| -> bool { !x.busy })
+                        .count();
+                    if free_slots > mostfreeslots {
+                        mostfreeslots = free_slots;
+                        best_eu_index = Some(eu_index);
+                    }
+                }
+
+                match best_eu_index {
+                    Some(index) => {
+                        let execution_unit = &mut state.execution_units[index];
+                        let exec_index =
+                            best_eu_index.expect("EU chosen without index given") as u8;
+                        match execution_unit.issue(
+                            state.instr_reg.clone(),
+                            &mut state.registers,
+                            exec_index,
+                            &mut state.cdb,
+                        ) {
+                            // try to issue to the unit
+                            Some(slot_index) => {
+                                // if we did issue to a slot...
+                                match state.instr_reg {
+                                    // update branch index if branch instruction sent
+                                    Instr::Biez(..) => {
+                                        state.branch_index =
+                                            Some((exec_index as usize, slot_index));
+                                    }
+                                    Instr::Bigz(..) => {
+                                        state.branch_index =
+                                            Some((exec_index as usize, slot_index));
+                                    }
+                                    Instr::Bilz(..) => {
+                                        state.branch_index =
+                                            Some((exec_index as usize, slot_index));
+                                    }
+                                    Instr::J(..) => {
+                                        state.branch_index =
+                                            Some((exec_index as usize, slot_index));
+                                    }
+                                    _ => (),
                                 }
-                                Instr::Bigz(_, _) => {
-                                    state.branch_index = Some((exec_index, slot_index));
-                                }
-                                Instr::Bilz(_, _) => {
-                                    state.branch_index = Some((exec_index, slot_index));
-                                }
-                                _ => (),
+                                state.prog_counter = state.prog_counter.saturating_add(1);
+                                // saturating add because Halt could have executed - Halt just sets PC to u8::MAX
                             }
-                            state.prog_counter = state.prog_counter.saturating_add(1); // saturating add because Halt could have executed - Halt just sets PC to u8::MAX
-                            break;
-                        }
-                        None => (), // if we didn't issue the slot must have been busy, so let the for loop try the next one
-                    };
+                            None => (), // if we didn't issue the slot must have been busy, so let the for loop try the next one
+                        };
+                    }
+                    None => eprintln!("NO EU WITH SLOTS AVAILABLE"),
                 }
             }
         }
@@ -116,7 +149,7 @@ fn main() {
     // let args: Vec<String> = env::args().collect();
     // let path = args.get(2).map(String::as_str).unwrap_or("./program.txt");
     // let program: Vec<Instr> = load_program(path);
-    let program: Vec<Instr> = load_program("multest");
+    let program: Vec<Instr> = load_program(PROGNAME);
     println!("{:?}\n\n", program);
 
     let prog_counter: i64 = 0;

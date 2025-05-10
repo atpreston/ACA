@@ -1,9 +1,7 @@
 use crate::processor::*;
 use core::fmt;
 
-pub const SLOT_NUM: usize = 2;
-
-pub type CDB = Vec<(i64, u8)>;
+pub type CDB = Vec<(i64, (u8, u8))>; // (value, (EU, slot))
 
 #[derive(PartialEq, Eq, Clone)]
 pub struct ReservationSlot {
@@ -50,17 +48,13 @@ impl fmt::Display for ReservationSlot {
 
 impl ReservationSlot {
     pub fn tick(&mut self, cdb: &mut CDB) {
-        eprintln!(
-            "TICKING SLOT with j: {:?}, k: {:?}, ready?: {}",
-            self.j, self.k, self.ready
-        );
         if !self.ready {
             for (val, tag) in cdb {
                 match self.j {
                     RegisterVal::Val(_) => (),
                     RegisterVal::Tag(t) => {
                         eprintln!("CHECKING {:?} AGAINST CDB VALUE {:?}", t, *tag);
-                        if *tag == t {
+                        if (*tag) == t {
                             self.j = RegisterVal::Val(*val);
                         }
                     }
@@ -108,7 +102,7 @@ impl ReservationStation {
         for (i, possible_slot) in self.slots.iter_mut().enumerate() {
             if possible_slot.busy == false {
                 slot_index = Some(i);
-                println!("issuing on slot {}", i);
+                println!("issuing {:?} on EU {}, slot {}", inst, my_index, i);
                 break;
             }
         }
@@ -117,6 +111,7 @@ impl ReservationStation {
             Some(i) => {
                 // initialise slot
                 let operands: Vec<RegisterVal> = inst.clone().get_operands(&registers);
+                eprintln!("OPERANDS: {:?}", operands);
                 let destination = inst.clone().get_location();
                 // println!(
                 //     "#####\nInstr: {:?}, Operands: {:?}, Destination: {:?}\n#####",
@@ -137,9 +132,9 @@ impl ReservationStation {
                 }
                 if let Some(dest) = destination {
                     eprintln!("Deferring register {dest} to unit {}", my_index);
-                    registers[dest as usize] = RegisterVal::Tag(my_index);
+                    registers[dest as usize] = RegisterVal::Tag((my_index, i as u8));
                 }
-                self.slots[i] = ReservationSlot {
+                self.slots[i as usize] = ReservationSlot {
                     op: inst,
                     j: j,
                     k: k,

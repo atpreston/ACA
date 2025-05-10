@@ -4,28 +4,15 @@ use either::*;
 use crate::execution::ExecutionUnit;
 use crate::reservation::*;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum RegisterVal {
-    Val(i64),
-    Tag(u8),
-}
-impl RegisterVal {
-    pub fn to_either(self) -> Either<i64, u8> {
-        match self {
-            RegisterVal::Val(val) => Either::Left(val),
-            RegisterVal::Tag(tag) => Either::Right(tag),
-        }
-    }
-}
+pub const PROGNAME: &str = "testloads";
+pub const MEMSIZE: usize = 2048;
+pub const REGISTERS: usize = 8;
+pub const EXECUTIONUNITS: usize = 8;
+pub const SLOT_NUM: usize = 4;
 
 pub type RegisterIndex = u8;
 pub type Immediate = i64;
 pub type MemoryIndex = u8;
-// pub type Label = String;
-
-pub const MEMSIZE: usize = 2048;
-pub const REGISTERS: usize = 8;
-pub const EXECUTIONUNITS: usize = 5;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Operand {
@@ -42,6 +29,20 @@ impl Operand {
                 let reg_val = registers[*ind as usize];
                 return reg_val;
             }
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum RegisterVal {
+    Val(i64),
+    Tag((u8, u8)), // EU, slot
+}
+impl RegisterVal {
+    pub fn to_either(self) -> Either<i64, (u8, u8)> {
+        match self {
+            RegisterVal::Val(val) => Either::Left(val),
+            RegisterVal::Tag(tag) => Either::Right(tag),
         }
     }
 }
@@ -142,8 +143,8 @@ impl Instr {
             Instr::St(..) => Some(ExecLocation::Mem(vj, 0)),
 
             Instr::Bilz(..) => {
-                if vj < 0 {
-                    *prog_counter = vk as u8;
+                if vk < 0 {
+                    *prog_counter = vj as u8;
                 }
                 None
             }
@@ -154,13 +155,14 @@ impl Instr {
                 None
             }
             Instr::Biez(..) => {
-                if vj == 0 {
-                    *prog_counter = vk as u8;
+                if vk == 0 {
+                    *prog_counter = vj as u8;
                 }
                 None
             }
             Instr::J(..) => {
-                *prog_counter += vj as u8;
+                eprintln!("JUMPING PC TO {}", vj);
+                *prog_counter = vj as u8;
                 None
             }
             Instr::Noop() => None,
@@ -195,10 +197,10 @@ impl Instr {
             Instr::Cp(_, operand) => vec![operand.extract(registers)],
             Instr::Ld(_, operand) => vec![operand.extract(registers)],
             Instr::St(_, operand) => vec![operand.extract(registers)],
-            Instr::J(_) => vec![],
-            Instr::Bilz(_, operand) => vec![RegisterVal::Tag(operand)],
-            Instr::Bigz(_, operand) => vec![RegisterVal::Tag(operand)],
-            Instr::Biez(_, operand) => vec![RegisterVal::Tag(operand)],
+            Instr::J(imm) => vec![RegisterVal::Val(imm)],
+            Instr::Bilz(imm, index) => vec![RegisterVal::Val(imm), registers[index as usize]],
+            Instr::Bigz(imm, index) => vec![RegisterVal::Val(imm), registers[index as usize]],
+            Instr::Biez(imm, index) => vec![RegisterVal::Val(imm), registers[index as usize]],
             Instr::Noop() => vec![],
             Instr::Halt() => vec![],
         }

@@ -5,19 +5,19 @@ use crate::reservation::*;
 
 const fn get_cycles(inst: Instr) -> usize {
     match inst {
-        processor::Instr::Add(_, _, _) => 2,
-        processor::Instr::And(_, _, _) => 1,
-        processor::Instr::Cp(_, _) => 5,
+        processor::Instr::Add(..) => 2,
+        processor::Instr::And(..) => 1,
+        processor::Instr::Cp(..) => 5,
         processor::Instr::Halt() => 1,
-        processor::Instr::J(_) => 2,
-        processor::Instr::Ld(_, _) => 1,
-        processor::Instr::Mul(_, _, _) => 10,
+        processor::Instr::J(..) => 2,
+        processor::Instr::Ld(..) => 1,
+        processor::Instr::Mul(..) => 10,
         processor::Instr::Noop() => 1,
-        processor::Instr::Not(_, _) => 1,
-        processor::Instr::Or(_, _, _) => 1,
-        processor::Instr::St(_, _) => 5,
-        processor::Instr::Sub(_, _, _) => 3,
-        processor::Instr::Xor(_, _, _) => 1,
+        processor::Instr::Not(..) => 1,
+        processor::Instr::Or(..) => 1,
+        processor::Instr::St(..) => 5,
+        processor::Instr::Sub(..) => 3,
+        processor::Instr::Xor(..) => 1,
         _ => 5, // conditional jumps/branches
     }
 }
@@ -28,12 +28,19 @@ pub struct ExecutionUnit {
     tick: usize,
     current_slot_index: Option<usize>,
     executing: bool,
-    cdb_result: Option<(i64, u8)>,
-    pub writeback_result: Option<ExecLocation>,
+    cdb_result: Option<(i64, (u8, u8))>,
+    pub writeback_result: Option<(ExecLocation, usize)>, // location for writeback, and index of origin slot
 }
 
 impl fmt::Debug for ExecutionUnit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut progress: f32 = 0 as f32;
+        if let Some(slot_index) = self.current_slot_index {
+            progress = self.tick.clone() as f32
+                / get_cycles(self.reservation_station.slots[slot_index].op.clone()) as f32;
+        }
+        let percent = (progress * (100 as f32)).round();
+
         f.debug_tuple("")
             .field(&format_args!(
                 "Res Station: {:?}",
@@ -48,7 +55,7 @@ impl fmt::Debug for ExecutionUnit {
                 &self.writeback_result
             ))
             .field(&format_args!("Executing? {}", &self.executing))
-            .field(&format_args!("Tick: {}", &self.tick))
+            .field(&format_args!("Tick: {} ({}%)", &self.tick, percent))
             .finish()
     }
 }
@@ -89,10 +96,10 @@ impl ExecutionUnit {
                 self.executing = false;
                 self.current_slot_index = None;
                 cdb.retain(|x| -> bool {
-                    if x.1 == my_index {
+                    if x.1 == (my_index, i as u8) {
                         eprintln!("FLUSHING {:?}", x);
                     }
-                    x.1 != my_index
+                    x.1 != (my_index, i as u8)
                 });
                 return Some(i);
             }
@@ -129,7 +136,7 @@ impl ExecutionUnit {
                         prog_counter,
                     );
                     if let Some(location) = writeback_temp.clone() {
-                        self.cdb_result = Some((location.val(), index));
+                        self.cdb_result = Some((location.val(), (index, slot_index as u8)));
                     }
                     self.tick = 0;
                     self.current_slot_index = None;
@@ -139,10 +146,12 @@ impl ExecutionUnit {
                     if let Some(destination) = maybe_dest {
                         match writeback_temp {
                             Some(ExecLocation::Reg(val, _)) => {
-                                self.writeback_result = Some(ExecLocation::Reg(val, destination))
+                                self.writeback_result =
+                                    Some((ExecLocation::Reg(val, destination), slot_index))
                             }
                             Some(ExecLocation::Mem(val, _)) => {
-                                self.writeback_result = Some(ExecLocation::Mem(val, destination))
+                                self.writeback_result =
+                                    Some((ExecLocation::Mem(val, destination), slot_index))
                             }
                             None => {}
                         }
