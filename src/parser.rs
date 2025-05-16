@@ -1,3 +1,5 @@
+// THIS FILE IS NOT USED BY THE FINAL SIMULATOR
+
 use crate::processor::{Immediate, Instr, Operand, Program, RegisterIndex};
 use pest::{iterators::Pairs, Parser};
 use pest_derive::Parser;
@@ -144,10 +146,7 @@ fn parse_pair(pair: pest::iterators::Pair<'_, Rule>) -> Result<Program, &'static
         Rule::cpinst => Ok(vec![Instr::Cp(unwrap_dest, operands[1])]),
         Rule::ldinst => Ok(vec![Instr::Ld(unwrap_dest, operands[1])]),
         Rule::jinst => Ok(vec![Instr::J(operands[1])]),
-        Rule::bilzinst => Ok(vec![Instr::Bilz(
-            unwrap_dest,
-            operands[1]
-        )]),
+        Rule::bilzinst => Ok(vec![Instr::Bilz(unwrap_dest, operands[1])]),
 
         Rule::noopinst => Ok(vec![Instr::Noop()]),
         Rule::haltinst => Ok(vec![Instr::Halt()]),

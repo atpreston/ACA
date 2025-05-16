@@ -41,7 +41,7 @@ impl UserMode {
                     None => (),
                 },
                 ExecMode::AutoStep => {
-                    sleep(time::Duration::from_millis(100));
+                    sleep(time::Duration::from_millis(500));
                     // match get_input() {
                     //     Some(new_exec_mode) => {
                     //         self.exec_mode = new_exec_mode;

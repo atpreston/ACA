@@ -1,3 +1,5 @@
+// THIS FILE IS NOT USED BY THE FINAL SIMULATOR
+
 register = {^"r" ~ ASCII_DIGIT+}
 immediate = {"#" ~ ASCII_DIGIT+}
 

@@ -1,1 +1,0 @@
-Ensure CDB pairs encode EU and slot index

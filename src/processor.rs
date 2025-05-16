@@ -4,11 +4,13 @@ use either::*;
 use crate::execution::ExecutionUnit;
 use crate::reservation::*;
 
-pub const PROGNAME: &str = "testloads";
+// VALUES TO CHANGE
+pub const PROGNAME: &str = "collatz";
 pub const MEMSIZE: usize = 2048;
 pub const REGISTERS: usize = 8;
-pub const EXECUTIONUNITS: usize = 8;
-pub const SLOT_NUM: usize = 4;
+pub const EXECUTIONUNITS: usize = 3;
+pub const SLOT_NUM: usize = 1;
+// VALUES TO CHANGE
 
 pub type RegisterIndex = u8;
 pub type Immediate = i64;
